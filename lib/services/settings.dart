@@ -28,7 +28,8 @@ class Settings extends ChangeNotifier {
   NoteNaming get naming => NoteNaming.values[_prefs.getInt('naming') ?? NoteNaming.solfege.index];
   set naming(NoteNaming v) => _setInt('naming', v.index);
 
-  InputMode get inputMode => InputMode.values[_prefs.getInt('inputMode') ?? 0];
+  InputMode get inputMode =>
+      InputMode.values[_prefs.getInt('inputMode') ?? InputMode.touch.index];
   set inputMode(InputMode v) => _setInt('inputMode', v.index);
 
   int get perfectMs => _prefs.getInt('perfectMs') ?? 90;
@@ -62,6 +63,22 @@ class Settings extends ChangeNotifier {
 
   bool get vibrateOnBar => _prefs.getBool('vibrateOnBar') ?? false;
   set vibrateOnBar(bool v) => _setBool('vibrateOnBar', v);
+
+  /// Som de piano ao tocar nas teclas da tela.
+  bool get keySound => _prefs.getBool('keySound') ?? true;
+  set keySound(bool v) => _setBool('keySound', v);
+
+  /// Tocar sozinho a mão que não está sendo treinada.
+  bool get autoOtherHand => _prefs.getBool('autoOtherHand') ?? true;
+  set autoOtherHand(bool v) => _setBool('autoOtherHand', v);
+
+  /// Guia: tocar a música inteira junto (para ouvir como deve soar).
+  bool get guideSound => _prefs.getBool('guideSound') ?? false;
+  set guideSound(bool v) => _setBool('guideSound', v);
+
+  /// 0.0 a 1.0
+  double get volume => _prefs.getDouble('volume') ?? 0.9;
+  set volume(double v) => _setDouble('volume', v);
 
   void _setInt(String k, int v) {
     _prefs.setInt(k, v);

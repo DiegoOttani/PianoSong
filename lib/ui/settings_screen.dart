@@ -44,6 +44,33 @@ class SettingsScreen extends StatelessWidget {
                 onSelectionChanged: (v) => s.naming = v.first,
               ),
             ),
+            _header(context, 'Som'),
+            ListTile(
+              title: Text('Volume do piano: ${(s.volume * 100).round()}%'),
+              subtitle: Slider(
+                value: s.volume,
+                min: 0,
+                max: 1,
+                divisions: 20,
+                onChanged: (v) => s.volume = v,
+              ),
+            ),
+            SwitchListTile(
+              title: const Text('Som nas teclas da tela'),
+              value: s.keySound,
+              onChanged: (v) => s.keySound = v,
+            ),
+            SwitchListTile(
+              title: const Text('Tocar a outra mão sozinho'),
+              subtitle: const Text('Ao treinar só uma mão'),
+              value: s.autoOtherHand,
+              onChanged: (v) => s.autoOtherHand = v,
+            ),
+            SwitchListTile(
+              title: const Text('Guia: tocar a música junto'),
+              value: s.guideSound,
+              onChanged: (v) => s.guideSound = v,
+            ),
             _header(context, 'Microfone'),
             ListTile(
               leading: const Icon(Icons.tune),

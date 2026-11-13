@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../audio/piano_sound.dart';
 import '../game/game_engine.dart';
 import '../library/song_repository.dart';
 import '../services/app_services.dart';
@@ -53,7 +54,9 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
   Future<void> _load() async {
     final services = AppServices.of(context);
     try {
-      final fit = await services.repository.loadSong(widget.entry, services.settings.keyboard);
+      final kb = services.settings.keyboard;
+      PianoSound.instance.prepare(kb.lowest, kb.highest); // gera os sons em segundo plano
+      final fit = await services.repository.loadSong(widget.entry, kb);
       if (!mounted) return;
       // Começa no nível mais alto já liberado.
       final repo = services.repository;
@@ -84,7 +87,7 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
     return song.barsMs.where((b) => b < last).length;
   }
 
-  void _start() {
+  void _start({bool demo = false}) {
     final services = AppServices.of(context);
     final s = services.settings;
     final song = _song;
@@ -92,10 +95,10 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
     final config = GameConfig(
       song: song,
       speed: _speed,
-      waitMode: _waitMode,
-      hands: _hands.hands,
+      waitMode: _waitMode && !demo,
+      hands: demo ? HandChoice.both.hands : _hands.hands,
       windows: s.windows,
-      latencyMs: _input == InputMode.microphone ? s.latencyMs : 0,
+      latencyMs: _input == InputMode.microphone && !demo ? s.latencyMs : 0,
       loopStartMs: _loop && bars.isNotEmpty ? bars[_loopBars.start.round()] : null,
       loopEndMs: _loop && bars.isNotEmpty
           ? (_loopBars.end.round() < bars.length
@@ -112,6 +115,7 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
             config: config,
             difficulty: _difficulty,
             inputMode: _input,
+            demo: demo,
           ),
         ))
         .then((_) => mounted ? setState(() {}) : null);
@@ -178,11 +182,24 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
           : SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(12),
-                child: FilledButton.icon(
-                  onPressed: _start,
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Tocar'),
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                child: Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => _start(demo: true),
+                      icon: const Icon(Icons.headphones),
+                      label: const Text('Ouvir'),
+                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 52)),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _start,
+                        icon: const Icon(Icons.play_arrow),
+                        label: const Text('Tocar'),
+                        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -260,6 +277,49 @@ class _SongDetailScreenState extends State<SongDetailScreen> {
             services.settings.inputMode = s.first;
           },
         ),
+        if (_input == InputMode.touch)
+          ListenableBuilder(
+            listenable: services.settings,
+            builder: (context, _) {
+              final s = services.settings;
+              return Column(
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Som nas teclas'),
+                    value: s.keySound,
+                    onChanged: (v) => s.keySound = v,
+                  ),
+                  if (_hands != HandChoice.both)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('Tocar a outra mão sozinho'),
+                      value: s.autoOtherHand,
+                      onChanged: (v) => s.autoOtherHand = v,
+                    ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Guia: tocar a música junto'),
+                    subtitle: const Text('Você ouve como deve soar enquanto toca'),
+                    value: s.guideSound,
+                    onChanged: (v) => s.guideSound = v,
+                  ),
+                ],
+              );
+            },
+          )
+        else
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              'Com o microfone o app fica sem som, para não confundir a detecção. '
+              'Use "Toque na tela" para ter o som do piano.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
         const SizedBox(height: 16),
         Text('Velocidade: ${(_speed * 100).round()}%'),
         Slider(

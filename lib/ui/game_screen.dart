@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_soloud/flutter_soloud.dart' show SoundHandle;
 
+import '../audio/piano_sound.dart';
 import '../core/keyboard_layout.dart';
 import '../core/note.dart';
 import '../detection/pitch_listener.dart';
@@ -22,12 +24,16 @@ class GameScreen extends StatefulWidget {
     required this.config,
     required this.difficulty,
     required this.inputMode,
+    this.demo = false,
   });
 
   final SongEntry entry;
   final GameConfig config;
   final Difficulty difficulty;
   final InputMode inputMode;
+
+  /// Modo "Ouvir": o app toca a música sozinho, sem pontuação.
+  final bool demo;
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -46,9 +52,14 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   StreamSubscription<HeardNote>? _heardSub;
   String? _micError;
   int _lastBarVibrated = -1;
+  int _autoIdx = 0;
+  final _pointerNotes = <int, SoundHandle?>{};
 
   Settings get _settings => AppServices.of(context).settings;
   KeyboardSize get _keyboard => _settings.keyboard;
+
+  /// Com microfone o app fica mudo (o som atrapalharia a detecção).
+  bool get _soundOn => widget.demo || widget.inputMode != InputMode.microphone;
 
   @override
   void initState() {
@@ -58,11 +69,14 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _engine = GameEngine(widget.config);
     _ticker = createTicker(_onTick)..start();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _startMic());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_soundOn) PianoSound.instance.prepare(_keyboard.lowest, _keyboard.highest);
+      _startMic();
+    });
   }
 
   Future<void> _startMic() async {
-    if (widget.inputMode != InputMode.microphone) return;
+    if (widget.demo || widget.inputMode != InputMode.microphone) return;
     final s = _settings;
     final listener = PitchListener(
       lowest: _keyboard.lowest,
@@ -103,6 +117,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     _lastElapsed = elapsed;
     if (_paused || _engine.finished) return;
     _engine.tick(delta.clamp(0, 100));
+    _autoPlay();
     _consumeEvents();
     _maybeVibrate();
     _repaint.value++;
@@ -122,7 +137,43 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     }
   }
 
+  /// Notas que o app toca sozinho: a outra mão, o guia ou tudo (modo Ouvir).
+  void _autoPlay() {
+    final t = _engine.songTimeMs;
+    final notes = _engine.notes;
+    final s = _settings;
+    final now = _now();
+    while (_autoIdx < notes.length && notes[_autoIdx].note.startMs <= t) {
+      final p = notes[_autoIdx++];
+      if (t - p.note.startMs > 250) continue; // ficou para trás (loop/pausa)
+      final n = p.note;
+      final auto = widget.demo || !p.active;
+      if (widget.demo && p.active) _engine.notePlayed(n.pitch);
+      final audible = _soundOn &&
+          (widget.demo || s.guideSound || (!p.active && s.autoOtherHand));
+      if (audible) {
+        PianoSound.instance.playFor(
+          n.pitch,
+          Duration(milliseconds: (n.durationMs / _engine.speed).round()),
+          volume: s.volume * (p.active || widget.demo ? 1.0 : 0.75),
+        );
+      }
+      if (auto && !widget.demo) {
+        _flashes[n.pitch] = KeyFlash(GameColors.inactive, now);
+      }
+    }
+  }
+
+  void _resetAutoPlay() {
+    _autoIdx = 0;
+    while (_autoIdx < _engine.notes.length &&
+        _engine.notes[_autoIdx].note.startMs < _engine.songTimeMs) {
+      _autoIdx++;
+    }
+  }
+
   void _play(int midi) {
+    if (widget.demo) return;
     _engine.notePlayed(midi);
     _consumeEvents();
   }
@@ -143,12 +194,18 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
           break;
         case GameEventType.loopRestart:
           _listener?.resetOnsets();
+          _resetAutoPlay();
       }
     }
     if (mounted) setState(() {});
   }
 
   Future<void> _finish() async {
+    if (widget.demo) {
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
     final repo = AppServices.of(context).repository;
     await _listener?.stop();
     final s = _engine.score;
@@ -190,7 +247,16 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     final midi = geo.keyAt(e.localPosition.dx, preferBlack: e.localPosition.dy < blackBottom);
     if (midi == null) return;
     _flashes.putIfAbsent(midi, () => KeyFlash(Colors.white38, _now()));
+    if (_soundOn && _settings.keySound) {
+      _pointerNotes[e.pointer] = PianoSound.instance.noteOn(midi, volume: _settings.volume);
+    }
     _play(midi);
+  }
+
+  void _onPointerUp(PointerEvent e) {
+    if (_pointerNotes.containsKey(e.pointer)) {
+      PianoSound.instance.noteOff(_pointerNotes.remove(e.pointer));
+    }
   }
 
   Future<void> _pause() async {
@@ -214,6 +280,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
       case 'restart':
         setState(() {
           _engine = GameEngine(widget.config);
+          _autoIdx = 0;
           _flashes.clear();
           _lastBarVibrated = -1;
           _listener?.resetOnsets();
@@ -244,6 +311,8 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
             children: [
               Listener(
                 onPointerDown: (e) => _onPointerDown(e, c),
+                onPointerUp: _onPointerUp,
+                onPointerCancel: _onPointerUp,
                 child: CustomPaint(
                   size: Size(c.maxWidth, c.maxHeight),
                   painter: FallingNotesPainter(
@@ -272,7 +341,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${widget.entry.title} · ${widget.difficulty.label} · ${(_engine.speed * 100).round()}%'
+                            '${widget.demo ? 'Ouvindo · ' : ''}${widget.entry.title} · ${widget.difficulty.label} · ${(_engine.speed * 100).round()}%'
                             '${_engine.config.hasLoop ? ' · loop ${_engine.loopCount + 1}' : ''}',
                             style: const TextStyle(color: Colors.white70, fontSize: 12),
                             overflow: TextOverflow.ellipsis,
