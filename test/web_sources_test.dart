@@ -30,6 +30,30 @@ void main() {
     expect(titleFromDownload(url: 'blob:https://x.com/abc'), '');
   });
 
+  test('detector: mesma URL repetida sem carregar página = download', () {
+    var now = DateTime(2026);
+    final d = DownloadDetector(clock: () => now);
+    const file = 'https://site.com/download/123';
+
+    // Link comum: navega e a página carrega.
+    expect(d.isDownload('https://site.com/musica/123'), isFalse);
+    d.pageStarted('https://site.com/musica/123');
+    expect(d.isDownload('https://site.com/musica/123'), isFalse, reason: 'voltou à mesma página depois');
+
+    // Download: o WebView repete o pedido sem carregar página.
+    expect(d.isDownload(file), isFalse);
+    now = now.add(const Duration(milliseconds: 300));
+    expect(d.isDownload(file), isTrue);
+
+    // Repetição muito depois não conta.
+    expect(d.isDownload('https://site.com/x'), isFalse);
+    now = now.add(const Duration(seconds: 10));
+    expect(d.isDownload('https://site.com/x'), isFalse);
+
+    expect(d.isDownload('blob:https://site.com/abc'), isTrue);
+    expect(d.isDownload('https://site.com/a.mid'), isTrue);
+  });
+
   test('URLs de busca', () {
     expect(WebSource.midiShow.urlFor('great days'),
         'https://www.midishow.com/en/search/result?q=great+days');

@@ -58,6 +58,37 @@ Uint8List? extractMidi(Uint8List bytes) {
   return null;
 }
 
+/// Distingue downloads de navegações comuns no WebView oficial do Flutter.
+///
+/// No Android, quando o site inicia um download, o pacote `webview_flutter`
+/// avisa como se fosse uma navegação para a mesma URL. Se a navegação for
+/// permitida, o WebView tenta abrir a URL, percebe de novo que é download e
+/// avisa outra vez. Então: **mesma URL pedida duas vezes em poucos segundos,
+/// sem a página ter começado a carregar = download**. Links .mid e blob/data
+/// são download direto.
+class DownloadDetector {
+  DownloadDetector({this.window = const Duration(seconds: 4), DateTime Function()? clock})
+      : _clock = clock ?? DateTime.now;
+
+  final Duration window;
+  final DateTime Function() _clock;
+  final Map<String, DateTime> _pending = {};
+
+  bool isDownload(String url) {
+    if (looksLikeMidiUrl(url) || url.startsWith('blob:') || url.startsWith('data:')) {
+      return true;
+    }
+    final now = _clock();
+    _pending.removeWhere((_, t) => now.difference(t) > window);
+    if (_pending.remove(url) != null) return true;
+    _pending[url] = now;
+    return false;
+  }
+
+  /// A página começou a carregar: era navegação de verdade.
+  void pageStarted(String url) => _pending.remove(url);
+}
+
 bool looksLikeMidiUrl(String url) {
   final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
   return path.endsWith('.mid') || path.endsWith('.midi') || path.endsWith('.kar');
