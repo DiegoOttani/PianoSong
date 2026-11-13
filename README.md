@@ -24,6 +24,15 @@ A **calibração** (no primeiro uso) mede o ruído do ambiente, testa 3 notas e 
 
 Dicas: deixe o celular perto do teclado, num ambiente silencioso, e não toque outro som no celular durante o jogo.
 
+## Instalar (sem cabo USB)
+O GitHub Actions gera o APK e publica na página de **Releases** do repositório:
+- **Build de teste:** aba *Actions* → *Gerar APK (release)* → *Run workflow*.
+- **Versão:** `git tag v1.0.0 && git push origin v1.0.0`.
+
+Baixe o `PianoSong-*.apk` da release e abra no celular. Na primeira vez, o Android pede para permitir instalar apps dessa fonte.
+
+O APK é assinado com a chave guardada nos segredos do repositório (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`). Usar sempre a mesma chave permite instalar versões novas por cima, sem perder o histórico.
+
 ## Desenvolvimento
 
 Requisitos: [Flutter](https://docs.flutter.dev/get-started/install) (testado com 3.50 / Dart 3.14) e o Android SDK (via Android Studio).
