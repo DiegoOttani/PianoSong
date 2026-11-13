@@ -28,6 +28,38 @@ class WebSourceScreen extends StatefulWidget {
 class _WebSourceScreenState extends State<WebSourceScreen> {
   static const _channel = 'PianoSongMidi';
 
+  /// Injetado em cada página: guarda os arquivos temporários (blob) que a
+  /// página cria e atrasa a remoção deles, porque sites como o Online
+  /// Sequencer geram o MIDI, disparam o download e apagam o arquivo na hora.
+  /// Também guarda o nome sugerido pelo link de download.
+  static const _blobHook = '''
+    (() => {
+      if (window.__psHooked) return;
+      window.__psHooked = true;
+      window.__psBlobs = {};
+      window.__psNames = {};
+      const create = URL.createObjectURL.bind(URL);
+      const revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (obj) => {
+        const u = create(obj);
+        try { if (obj instanceof Blob) window.__psBlobs[u] = obj; } catch (e) {}
+        return u;
+      };
+      URL.revokeObjectURL = (u) => {
+        setTimeout(() => { delete window.__psBlobs[u]; revoke(u); }, 120000);
+      };
+      const click = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () {
+        try { if (this.download) window.__psNames[this.href] = this.download; } catch (e) {}
+        return click.apply(this, arguments);
+      };
+      document.addEventListener('click', (ev) => {
+        const a = ev.target && ev.target.closest && ev.target.closest('a[download]');
+        if (a) window.__psNames[a.href] = a.download;
+      }, true);
+    })();
+  ''';
+
   late final WebViewController _web;
   final _cookies = WebViewCookieManager();
   final _detector = DownloadDetector();
@@ -47,7 +79,11 @@ class _WebSourceScreenState extends State<WebSourceScreen> {
       })
       ..setNavigationDelegate(NavigationDelegate(
         onProgress: (p) => mounted ? setState(() => _progress = p / 100) : null,
-        onPageStarted: _detector.pageStarted,
+        onPageStarted: (url) {
+          _detector.pageStarted(url);
+          _web.runJavaScript(_blobHook).catchError((_) {});
+        },
+        onPageFinished: (_) => _web.runJavaScript(_blobHook).catchError((_) {}),
         onNavigationRequest: (req) {
           if (req.isMainFrame && _detector.isDownload(req.url)) {
             _download(req.url);
@@ -76,7 +112,9 @@ class _WebSourceScreenState extends State<WebSourceScreen> {
             'assinatura ou que você escolha o formato MIDI.');
       }
       var title = titleFromDownload(contentDisposition: disposition, url: url);
-      if (title.isEmpty || RegExp(r'^\d+$').hasMatch(title)) {
+      final generic = RegExp(r'^(\d+|download|file|midi|sequence|song|untitled)$',
+          caseSensitive: false);
+      if (title.isEmpty || generic.hasMatch(title)) {
         title = _cleanPageTitle(await _web.getTitle()) ?? widget.query;
       }
       if (!mounted) return;
@@ -108,21 +146,30 @@ class _WebSourceScreenState extends State<WebSourceScreen> {
       final completer = _blobResult = Completer<String>();
       await _web.runJavaScript('''
         (async () => {
+          const url = ${jsonEncode(url)};
+          const send = (o) => $_channel.postMessage(JSON.stringify(o));
           try {
-            const r = await fetch(${jsonEncode(url)});
-            const b = await r.blob();
+            let b = window.__psBlobs && window.__psBlobs[url];
+            if (!b) b = await (await fetch(url)).blob();
             const fr = new FileReader();
-            fr.onload = () => $_channel.postMessage(fr.result);
-            fr.onerror = () => $_channel.postMessage('erro:leitura');
+            fr.onload = () => send({ data: fr.result, name: (window.__psNames || {})[url] || '' });
+            fr.onerror = () => send({ error: 'leitura' });
             fr.readAsDataURL(b);
-          } catch (e) { $_channel.postMessage('erro:' + e); }
+          } catch (e) { send({ error: String(e) }); }
         })();
       ''');
-      final value = await completer.future.timeout(const Duration(seconds: 20));
-      if (value.startsWith('erro:')) {
-        throw Exception('Não consegui ler o arquivo gerado pelo site ($value).');
+      final msg = jsonDecode(await completer.future.timeout(const Duration(seconds: 20)))
+          as Map<String, dynamic>;
+      if (msg['error'] != null) {
+        throw Exception('Não consegui ler o arquivo gerado pelo site (${msg['error']}). '
+            'Tente tocar em download de novo.');
       }
-      return (base64Decode(value.substring(value.indexOf(',') + 1)), null);
+      final data = msg['data'] as String;
+      final name = msg['name'] as String? ?? '';
+      return (
+        base64Decode(data.substring(data.indexOf(',') + 1)),
+        name.isEmpty ? null : 'attachment; filename="$name"',
+      );
     }
 
     final uri = Uri.parse(url);
