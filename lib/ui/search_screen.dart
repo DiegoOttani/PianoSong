@@ -2,9 +2,11 @@ import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../library/bitmidi_api.dart';
+import '../library/web_sources.dart';
 import '../services/app_services.dart';
 import 'parts_screen.dart';
 import 'song_detail_screen.dart';
+import 'web_source_screen.dart';
 import 'widgets.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -79,6 +81,13 @@ class _SearchScreenState extends State<SearchScreen> {
     ));
   }
 
+  void _openWeb(WebSource source) {
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => WebSourceScreen(source: source, query: _query.text),
+    ));
+  }
+
   Future<void> _openParts(PartsScreen screen) async {
     final saved = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => screen));
     if (saved != true || !mounted) return;
@@ -115,13 +124,32 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
           ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                const Text('Procurar em:  ', style: TextStyle(fontSize: 12)),
+                for (final s in WebSource.values)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ActionChip(
+                      avatar: const Icon(Icons.public, size: 16),
+                      label: Text(s.label),
+                      onPressed: () => _openWeb(s),
+                    ),
+                  ),
+              ],
+            ),
+          ),
           if (_loading && _results.isEmpty) const LinearProgressIndicator(),
           if (!_loading && _results.isEmpty)
             const Padding(
               padding: EdgeInsets.all(24),
               child: Text(
-                'As músicas vêm do BitMidi, um acervo público de arquivos MIDI. '
-                'Dica: buscar em inglês e com "piano" no nome costuma trazer versões melhores para tocar.',
+                'A busca abaixo usa o BitMidi, um acervo público de MIDIs. '
+                'Para anime e jogos, use os sites acima (MIDIShow e MuseScore têm muitos arranjos de piano): '
+                'eles abrem aqui dentro, e ao baixar um MIDI ele já entra no app.',
                 textAlign: TextAlign.center,
               ),
             ),
